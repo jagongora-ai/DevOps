@@ -1,0 +1,26 @@
+{
+  "cluster": "${CLUSTER}",
+  "serviceName": "client",
+  "taskDefinition": "bdget-client",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["${SUBNET1}", "${SUBNET2}"],
+      "securityGroups": ["${SG_ID}"],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "serviceConnectConfiguration": {
+    "enabled": true,
+    "namespace": "${NAMESPACE}",
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/bdget",
+        "awslogs-region": "${AWS_REGION}",
+        "awslogs-stream-prefix": "sc-client"
+      }
+    }
+  }
+}

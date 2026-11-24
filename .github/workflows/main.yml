@@ -1,0 +1,108 @@
+name: CI — Tests, Calidad y Seguridad
+
+# Pipeline de 11 pasos:
+#  1 Checkout  2 Java 21  3 Tests+JaCoCo  4 Artefacto JaCoCo  5 SonarCloud
+#  6 Snyk (dependencias)  7 Build .jar  8 Login DockerHub  9 Build imagen
+#  10 Snyk (imagen)  11 Push a DockerHub
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Principio de mínimo privilegio para el GITHUB_TOKEN automático
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build-test-analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Descargar el código ──
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # SonarCloud necesita el historial completo
+
+      # ── 2. Configurar Java 21 ──
+      # SonarCloud requiere Java 21+ para ejecutar el scanner.
+      # El código se sigue compilando en bytecode Java 17 (ver pom.xml).
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # ── 3. Ejecutar tests + generar reporte JaCoCo ──
+      # Los tests usan H2 en memoria: no necesitan MySQL.
+      - name: Ejecutar tests
+        run: mvn --batch-mode test
+
+      # ── 4. Subir reporte de cobertura como artefacto ──
+      - name: Subir reporte JaCoCo
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+
+      # ── 5. Analizar con SonarCloud (necesita el jacoco.xml del paso 3) ──
+      - name: Análisis SonarCloud
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # automático, no lo crees tú
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          mvn --batch-mode sonar:sonar \
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} \
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+          # Para que un Quality Gate FAILED detenga el pipeline, agrega esta línea al comando:
+          #   -Dsonar.qualitygate.wait=true
+
+      # ── 6. Escanear dependencias Maven con Snyk (SCA) ──
+      - name: Snyk — vulnerabilidades en dependencias (pom.xml)
+        uses: snyk/actions/maven@master
+        continue-on-error: true           # informa, pero no bloquea. Quítalo para bloquear.
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      # ── 7. Compilar el .jar ──
+      - name: Build del proyecto
+        run: mvn --batch-mode package -DskipTests
+
+      # ── 8. Login en DockerHub (solo en push a main) ──
+      - name: Login en DockerHub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── 9. Construir imagen Docker ──
+      # Dos etiquetas: "latest" y el SHA del commit. Los despliegues en AWS usan el SHA
+      # (trazable y reproducible); "latest" queda solo como comodín.
+      - name: Build de la imagen Docker
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/bdget-app:latest \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/bdget-app:${{ github.sha }} .
+
+      # ── 10. Escanear la imagen Docker con Snyk (antes de publicar) ──
+      - name: Snyk — vulnerabilidades en la imagen Docker
+        uses: snyk/actions/docker@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: ${{ secrets.DOCKERHUB_USERNAME }}/bdget-app:${{ github.sha }}
+          args: --severity-threshold=high --file=Dockerfile
+
+      # ── 11. Publicar imagen en DockerHub (solo desde main, nunca desde pull requests) ──
+      - name: Push de la imagen a DockerHub
+        if: github.event_name == 'push'
+        run: docker push --all-tags ${{ secrets.DOCKERHUB_USERNAME }}/bdget-app

@@ -1,0 +1,90 @@
+# ─────────────────────────────────────────────
+# MySQL + credenciales (equivalente al servicio "mysql" de docker-compose.yml)
+# ─────────────────────────────────────────────
+# Credenciales de LABORATORIO: son las mismas que usa docker-compose.yml.
+# En un entorno real usa AWS Secrets Manager / External Secrets, no las subas al repo.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bdget-db
+  namespace: bdget
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: root_pass
+  MYSQL_DATABASE: bdget_db
+  MYSQL_USER: bdget_user
+  MYSQL_PASSWORD: bdget_pass
+---
+# ServiceAccount propia: las AuthorizationPolicy identifican a cada carga por su ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mysql
+  namespace: bdget
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: bdget
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # un solo MySQL con volumen efímero: nunca dos a la vez
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+        version: v1
+    spec:
+      serviceAccountName: mysql
+      enableServiceLinks: false   # evita variables MYSQL_PORT=tcp://... que pisan a las de la imagen
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - name: tcp-mysql     # el prefijo "tcp-" le dice a Istio que es TCP puro
+              containerPort: 3306
+          envFrom:
+            - secretRef:
+                name: bdget-db
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+      volumes:
+        # LABORATORIO: los datos se pierden si el pod se recrea.
+        # Para persistir, instala el EBS CSI driver y usa un PersistentVolumeClaim.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: bdget
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: tcp-mysql
+      port: 3306
+      targetPort: tcp-mysql

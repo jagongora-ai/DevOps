@@ -1,0 +1,24 @@
+# Maven
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.eclipse
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Credenciales locales (nunca subir)
+*.env
+.env
+
+# Generado por ecs/render.sh (contiene IDs de tu cuenta AWS)
+ecs/out/

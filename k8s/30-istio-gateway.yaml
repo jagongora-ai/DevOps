@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────
+# Entrada a la malla: Istio Ingress Gateway -> bdget-app
+# ─────────────────────────────────────────────
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: bdget-gw
+  namespace: bdget
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts: ["*"]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: bdget-vs
+  namespace: bdget
+spec:
+  hosts: ["*"]
+  gateways: ["bdget-gw"]
+  http:
+    - route:
+        - destination:
+            host: bdget-app
+            port:
+              number: 8080

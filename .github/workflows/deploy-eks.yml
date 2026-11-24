@@ -1,0 +1,63 @@
+name: Deploy — EKS + Istio
+
+# Despliegue manual: Actions -> "Deploy — EKS + Istio" -> Run workflow.
+# Requiere que el clúster ya exista (guía OPCION A, pasos 1 a 3) y que la imagen
+# con la etiqueta indicada esté publicada en DockerHub (la publica main.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Etiqueta de la imagen (SHA del commit o latest)"
+        required: true
+        default: latest
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: bdget-eks
+  ISTIO_VERSION: "1.31.4"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      # En AWS Academy las credenciales expiran con cada sesión: actualiza los 3 secretos.
+      - name: Credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Conectar kubectl al clúster
+        run: aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Instalar istioctl
+        run: |
+          curl -sL https://istio.io/downloadIstio | ISTIO_VERSION="$ISTIO_VERSION" sh -
+          echo "$PWD/istio-$ISTIO_VERSION/bin" >> "$GITHUB_PATH"
+
+      # Falla el pipeline si la configuración de Istio es inválida (antes de tocar el clúster)
+      - name: Validar manifiestos de Istio
+        run: istioctl analyze --use-kube=false k8s/30-istio-gateway.yaml k8s/40-istio-security.yaml --failure-threshold Warning
+
+      - name: Aplicar manifiestos
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl apply -f k8s/10-mysql.yaml
+          sed -e "s|__DOCKERHUB_USER__|${DOCKERHUB_USER}|" \
+              -e "s|__IMAGE_TAG__|${IMAGE_TAG}|" k8s/20-app.yaml | kubectl apply -f -
+          kubectl apply -f k8s/30-istio-gateway.yaml
+          kubectl apply -f k8s/40-istio-security.yaml
+
+      - name: Esperar el rollout
+        run: kubectl rollout status deployment/bdget-app -n bdget --timeout=300s
+
+      - name: Validar la configuración desplegada
+        run: istioctl analyze -n bdget --failure-threshold Warning

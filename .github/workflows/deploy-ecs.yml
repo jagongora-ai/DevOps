@@ -1,0 +1,54 @@
+name: Deploy — ECS Fargate
+
+# Despliegue manual: Actions -> "Deploy — ECS Fargate" -> Run workflow.
+# Requiere que el clúster y los servicios ya existan (guía OPCION B, pasos 1 a 4) y que
+# la imagen con la etiqueta indicada esté publicada en DockerHub (la publica main.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Etiqueta de la imagen (SHA del commit o latest)"
+        required: true
+        default: latest
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER: bdget-ecs
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      # En AWS Academy las credenciales expiran con cada sesión: actualiza los 3 secretos.
+      - name: Credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Registrar nueva revisión de la task definition
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          sed -e "s|\${LAB_ROLE_ARN}|arn:aws:iam::${ACCOUNT_ID}:role/LabRole|g" \
+              -e "s|\${DOCKERHUB_USER}|${DOCKERHUB_USER}|g" \
+              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+              -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
+              ecs/td-app.tpl.json > td-app.json
+          aws ecs register-task-definition --cli-input-json file://td-app.json \
+            --query "taskDefinition.taskDefinitionArn" --output text
+
+      # Pasar solo el nombre de la familia usa la última revisión ACTIVE
+      - name: Actualizar el servicio
+        run: aws ecs update-service --cluster "$CLUSTER" --service bdget-app --task-definition bdget-app
+
+      # Falla el pipeline si el servicio no se estabiliza (health check de /actuator)
+      - name: Esperar a que el servicio esté estable
+        run: aws ecs wait services-stable --cluster "$CLUSTER" --services bdget-app

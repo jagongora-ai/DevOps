@@ -1,0 +1,100 @@
+# ─────────────────────────────────────────────
+# API Spring Boot (equivalente al servicio "app" de docker-compose.yml)
+# ─────────────────────────────────────────────
+# __DOCKERHUB_USER__ y __IMAGE_TAG__ se reemplazan con sed al aplicar el archivo (ver guía).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bdget-app
+  namespace: bdget
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bdget-app
+  namespace: bdget
+  labels:
+    app: bdget-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bdget-app
+  template:
+    metadata:
+      labels:
+        app: bdget-app
+        version: v1
+      annotations:
+        # El sidecar debe estar listo ANTES de arrancar Spring: la app abre la
+        # conexión a MySQL al iniciar y, sin proxy, esa conexión fallaría.
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
+    spec:
+      serviceAccountName: bdget-app
+      enableServiceLinks: false
+      containers:
+        - name: bdget-app
+          image: __DOCKERHUB_USER__/bdget-app:__IMAGE_TAG__
+          imagePullPolicy: Always
+          ports:
+            - name: http-api      # el prefijo "http-" activa métricas HTTP y el grafo L7 en Kiali
+              containerPort: 8080
+          env:
+            # Sobrescriben application.properties (igual que en docker-compose.yml)
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql:3306/bdget_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: bdget-db
+                  key: MYSQL_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bdget-db
+                  key: MYSQL_PASSWORD
+          # Spring Boot Actuator: management.endpoint.health.probes.enabled=true
+          startupProbe:                  # Spring tarda en arrancar y esperar a MySQL
+            httpGet:
+              path: /actuator/health/liveness
+              port: http-api
+            periodSeconds: 5
+            failureThreshold: 36         # hasta 3 minutos
+          # Ni liveness ni readiness consultan la BD a propósito: si MySQL cae, la API
+          # NO se reinicia ni sale del balanceo; responde 503 y eso se ve en Kiali/CloudWatch.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http-api
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http-api
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              memory: 768Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bdget-app
+  namespace: bdget
+  labels:
+    app: bdget-app
+spec:
+  selector:
+    app: bdget-app
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: http-api

@@ -1,0 +1,35 @@
+{
+  "family": "bdget-app",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "${LAB_ROLE_ARN}",
+  "taskRoleArn": "${LAB_ROLE_ARN}",
+  "containerDefinitions": [{
+    "name": "bdget-app",
+    "image": "${DOCKERHUB_USER}/bdget-app:${IMAGE_TAG}",
+    "essential": true,
+    "portMappings": [{ "name": "api-port", "containerPort": 8080, "protocol": "tcp", "appProtocol": "http" }],
+    "environment": [
+      { "name": "SPRING_DATASOURCE_URL", "value": "jdbc:mysql://mysql:3306/bdget_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true" },
+      { "name": "SPRING_DATASOURCE_USERNAME", "value": "bdget_user" },
+      { "name": "SPRING_DATASOURCE_PASSWORD", "value": "bdget_pass" }
+    ],
+    "healthCheck": {
+      "command": ["CMD-SHELL", "curl -fs http://localhost:8080/actuator/health/liveness || exit 1"],
+      "interval": 15,
+      "timeout": 5,
+      "retries": 5,
+      "startPeriod": 90
+    },
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/bdget",
+        "awslogs-region": "${AWS_REGION}",
+        "awslogs-stream-prefix": "app"
+      }
+    }
+  }]
+}

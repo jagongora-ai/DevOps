@@ -1,0 +1,18 @@
+{
+  "widgets": [
+    { "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+      "properties": { "title": "Requests por minuto (mesh)", "region": "${AWS_REGION}", "stat": "Sum", "period": 60,
+        "metrics": [["AWS/ECS","RequestCount","DiscoveryName","bdget-app","ServiceName","bdget-app","ClusterName","${CLUSTER}"]] } },
+    { "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+      "properties": { "title": "Latencia (ms)", "region": "${AWS_REGION}", "stat": "Average", "period": 60,
+        "metrics": [["AWS/ECS","TargetResponseTime","TargetDiscoveryName","bdget-app"]] } },
+    { "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+      "properties": { "title": "Respuestas 2XX vs 5XX", "region": "${AWS_REGION}", "stat": "Sum", "period": 60,
+        "metrics": [["AWS/ECS","HTTPCode_Target_2XX_Count","TargetDiscoveryName","bdget-app"],
+                    ["AWS/ECS","HTTPCode_Target_5XX_Count","TargetDiscoveryName","bdget-app"]] } },
+    { "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+      "properties": { "title": "CPU y Memoria del servicio", "region": "${AWS_REGION}", "stat": "Average", "period": 60,
+        "metrics": [["AWS/ECS","CPUUtilization","ClusterName","${CLUSTER}","ServiceName","bdget-app"],
+                    ["AWS/ECS","MemoryUtilization","ClusterName","${CLUSTER}","ServiceName","bdget-app"]] } }
+  ]
+}

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bdget
+  labels:
+    # Istio inyecta el sidecar (istio-proxy) en todos los pods de este namespace
+    istio-injection: enabled

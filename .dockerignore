@@ -1,0 +1,14 @@
+# Mantiene el contexto de build pequeño y evita copiar secretos o archivos generados
+target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+*.log
+*.env
+.env
+ecs/out/
+k8s/
+README.md
+docker-compose.yml
